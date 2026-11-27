@@ -1,4 +1,53 @@
-<!doctype html><html lang="es"><head><base target="_top"><meta name="viewport" content="width=device-width,initial-scale=1"><style> *{box-sizing:border-box}body{margin:0;background:#f7f4ed;color:#263c31;font:15px system-ui}header{padding:24px 5%;background:#263c31;color:#fff}h1,h2{font-family:Georgia;font-weight:normal}h1{margin:4px 0;font-size:35px}main{max-width:1350px;margin:auto;padding:24px}button,select,input,textarea{font:inherit;padding:10px;border:1px solid #c8c9bf;border-radius:6px;background:white;color:#263c31}button{cursor:pointer}button.primary{background:#263c31;color:white}nav{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0}.metrics{display:flex;gap:12px;flex-wrap:wrap}.metric{background:white;border:1px solid #ddd7c9;padding:20px;flex:1;min-width:175px}.metric strong{display:block;font:28px Georgia;margin-top:8px}.table{overflow:auto;background:white;border:1px solid #ddd7c9}table{border-collapse:collapse;width:100%;white-space:nowrap}td,th{padding:12px;text-align:left;border-bottom:1px solid #eee}th{background:#e9e6db;font-size:12px}dialog{border:0;border-radius:10px;width:min(650px,95vw);max-height:90vh;overflow:auto;padding:24px}dialog::backdrop{background:#0006}form{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:5px;font-size:13px}label input,label select,label textarea{width:100%}.wide{grid-column:1/-1}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:15px 0}#msg{color:#8b432c}a{color:#263c31}small{color:#736b5a}@media(max-width:600px){form{grid-template-columns:1fr}main{padding:12px}}</style></head><body><header><small style="color:#d6c6a6">É P O Q U E / PRIVATE ADMINISTRATION</small><h1>Gestión de viajes</h1>Reservas · viajeros · presupuesto</header><main><div class="toolbar"><select id="trip"></select><button onclick="edit('Viajes',{})">+ Nuevo viaje</button><button onclick="load()">Actualizar desde Sheets</button></div><div id="msg"></div><div class="metrics" id="metrics"></div><nav id="nav"></nav><div class="toolbar"><h2 id="heading"></h2><button class="primary" id="add">+ Agregar</button><input id="search" placeholder="Buscar…"></div><div class="table" id="table"></div></main><dialog id="modal"><h2 id="modalTitle"></h2><form id="form"></form><div class="toolbar"><button class="primary" id="save">Guardar cambios</button><button onclick="modal.close()">Cancelar</button></div><div id="err"></div></dialog><script>
-const schema={Viajes:['ID','Nombre','Inicio','Fin','Estado','USD_MXN','EUR_MXN'],Participantes:['ID','Viaje','Nombre','Ruta','Habitación','Meta MXN','Nota'],Servicios:['ID','Viaje','Categoría','Ciudad','Concepto','Inicio','Fin','Horario','Participantes','Importe','Moneda','Base','Estado','Incluir','Enlace','Nota'],Aportaciones:['ID','Viaje','Participante','Fecha','Concepto','MXN','Nota']};let data={},view='Hoteles',kind,editing,active='';const $=id=>document.getElementById(id),modal=$('modal'),esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>Number(n).toLocaleString('es-MX',{style:'currency',currency:'MXN'}),list=['Resumen','Viajes','Viajeros','Hoteles','Transportes','Extras','Pagos'];function load(){ $('msg').textContent='Consultando datos…';google.script.run.withSuccessHandler(apply).withFailureHandler(e=>$('msg').textContent=e.message).readAdmin()}function apply(d){data=d;$('msg').textContent='Datos sincronizados';active=data.Viajes.some(r=>r.ID===active)?active:data.Viajes[0]?.ID||'';$('trip').innerHTML=data.Viajes.map(r=>`<option value="${esc(r.ID)}">${esc(r.Nombre)}</option>`).join('');$('trip').value=active;render()};$('trip').onchange=()=>{active=$('trip').value;render()};$('search').oninput=render;function tableKind(){return ({Viajeros:'Participantes',Pagos:'Aportaciones',Viajes:'Viajes'})[view]||'Servicios'}function rows(k){return (data[k]||[]).filter(r=>k==='Viajes'||r.Viaje===active)}function calc(r){if(r.Importe===''||r.Importe===null)return null;let t=data.Viajes.find(x=>x.ID===active),rate=r.Moneda==='MXN'?1:r.Moneda==='USD'?Number(t.USD_MXN):r.Moneda==='EUR'?Number(t.EUR_MXN):0,n=String(r.Participantes).split(',').filter(Boolean).length;if(!rate||!n)return null;return Number(r.Importe)*rate*(r.Base==='Grupo'?1:n)}function render(){let services=rows('Servicios').filter(r=>r.Incluir==='Sí'&&r.Estado!=='Descartado'),people=rows('Participantes'),pay=rows('Aportaciones'),sum=a=>a.reduce((s,r)=>s+(calc(r)||0),0);$('metrics').innerHTML=[['Presupuesto parcial',money(sum(services))],['Comprado / pagado',money(sum(services.filter(r=>['Comprado','Pagado'].includes(r.Estado))))],['Viajeros',people.length],['Sin importe',services.filter(r=>calc(r)===null).length]].map(([k,v])=>`<div class="metric"><small>${k}</small><strong>${v}</strong></div>`).join('');$('nav').innerHTML='';list.forEach(v=>{let b=document.createElement('button');b.textContent=v;b.className=v===view?'primary':'';b.onclick=()=>{view=v;$('search').value='';render()};$('nav').append(b)});$('heading').textContent=view;$('add').style.display=view==='Resumen'?'none':'';$('add').onclick=()=>edit(tableKind(),{});let k=tableKind(),rr=rows(k);if(view==='Hoteles')rr=rr.filter(r=>r.Categoría==='Hotel');if(view==='Transportes')rr=rr.filter(r=>!['Hotel','Extra','Actividad'].includes(r.Categoría));if(view==='Extras')rr=rr.filter(r=>['Extra','Actividad'].includes(r.Categoría));rr=rr.filter(r=>JSON.stringify(r).toLowerCase().includes($('search').value.toLowerCase()));if(view==='Resumen'){let h=['Viajero','Hoteles','Transportes','Extras','Total previsto','Aportado','Saldo'];$('table').innerHTML='<table><thead><tr>'+h.map(x=>`<th>${x}</th>`).join('')+'</tr></thead><tbody>'+people.map(p=>{let a=services.filter(r=>String(r.Participantes).split(',').includes(p.ID));let part=r=>(calc(r)||0)/String(r.Participantes).split(',').filter(Boolean).length;let tot=filter=>a.filter(filter).reduce((s,r)=>s+part(r),0),hotel=tot(r=>r.Categoría==='Hotel'),extra=tot(r=>['Extra','Actividad'].includes(r.Categoría)),all=tot(()=>true),paid=pay.filter(r=>r.Participante===p.ID).reduce((s,r)=>s+Number(r.MXN||0),0);return '<tr>'+[p.Nombre,money(hotel),money(all-hotel-extra),money(extra),money(all),money(paid),money(all-paid)].map(x=>`<td>${esc(x)}</td>`).join('')+'</tr>'}).join('')+'</tbody></table>';return}let h=schema[k].filter(x=>!['ID','Viaje'].includes(x));if(k==='Servicios')h=h.filter(x=>x!=='Nota');let extra=k==='Servicios'?['Total MXN','Por noche']:[];$('table').innerHTML='<table><thead><tr>'+[...h,...extra,''].map(x=>`<th>${esc(x)}</th>`).join('')+'</tr></thead><tbody>'+rr.map((r,i)=>'<tr>'+h.map(x=>`<td>${x==='Enlace'&&/^https?:\/\//i.test(r[x])?`<a href="${esc(r[x])}" target="_blank" rel="noopener">Abrir reserva ↗</a>`:esc(r[x])}</td>`).join('')+(k==='Servicios'?`<td>${calc(r)===null?'Pendiente':money(calc(r))}</td><td>${r.Categoría==='Hotel'&&calc(r)!==null&&Date.parse(r.Fin)>Date.parse(r.Inicio)?money(calc(r)/((Date.parse(r.Fin)-Date.parse(r.Inicio))/86400000)):'—'}</td>`:'')+`<td><button data-i="${i}">Editar</button></td></tr>`).join('')+'</tbody></table>';$('table').querySelectorAll('button').forEach(b=>b.onclick=()=>edit(k,rr[Number(b.dataset.i)]))}
-function edit(k,r){kind=k;editing={...r};$('modalTitle').textContent=(r.ID?'Editar ':'Agregar ')+k;$('err').textContent='';const defaults={Viaje:active,Categoría:view==='Hoteles'?'Hotel':view==='Extras'?'Extra':'Tren',Estado:'Pendiente',Incluir:'Sí',Moneda:'MXN',Base:'Grupo',USD_MXN:18,EUR_MXN:21,Participantes:rows('Participantes').map(x=>x.ID).join(',')};let f=$('form');f.innerHTML='';for(let key of schema[k].filter(x=>x!=='ID'&&x!=='Viaje')){let l=document.createElement('label');l.textContent=key;let val=r[key]??defaults[key]??'';let opts=({Categoría:['Hotel','Vuelo','Tren','Transfer','Actividad','Extra'],Estado:k==='Viajes'?['En organización','Confirmado','Finalizado']:['Pendiente','Cotizado','Referencia','Opcional','Reservado','Comprado','Pagado','Descartado'],Incluir:['Sí','No'],Moneda:['MXN','USD','EUR'],Base:['Grupo','Individual']})[key];let e;if(key==='Participantes'){e=document.createElement('select');e.multiple=true;e.size=Math.min(6,rows('Participantes').length+1);rows('Participantes').forEach(p=>{let o=new Option(p.Nombre,p.ID);o.selected=String(val).split(',').includes(p.ID);e.add(o)});l.className='wide'}else if(opts||key==='Participante'){e=document.createElement('select');(opts||rows('Participantes').map(p=>p.ID)).forEach(o=>e.add(new Option(o,o)));e.value=val}else{e=document.createElement('input');e.type=['Inicio','Fin','Fecha'].includes(key)?'date':['Importe','MXN','USD_MXN','EUR_MXN','Meta MXN'].includes(key)?'number':'text';e.step='any';e.value=val}e.name=key;l.append(e);f.append(l)}modal.showModal()}
-$('save').onclick=()=>{let r={...editing,Viaje:active};for(let e of $('form').elements)r[e.name]=e.multiple?[...e.selectedOptions].map(o=>o.value).join(','):e.value;$('save').disabled=true;google.script.run.withSuccessHandler(d=>{$('save').disabled=false;modal.close();apply(d)}).withFailureHandler(e=>{$('save').disabled=false;$('err').textContent=e.message}).saveAdmin(kind,r)};load();</script></body></html>
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ÉPOQUE · Travel Manager</title>
+
+<script>
+  const ADMIN_URL = "https://script.google.com/macros/s/AKfycbwL4ypvvHNEpPuCHIw7N7LjCwYJVQgJnunEz9i0cIvrcBQzDk4rMgPtnQb2OItsel0i/exec";
+
+  window.location.replace(ADMIN_URL);
+</script>
+
+<style>
+  body {
+    background: #f7f4ed;
+    color: #263c31;
+    font-family: Georgia, serif;
+    text-align: center;
+    padding: 15vh 24px;
+  }
+
+  h1 {
+    font-size: 48px;
+    font-weight: normal;
+    letter-spacing: 8px;
+  }
+
+  p {
+    font-family: system-ui;
+    font-size: 14px;
+  }
+
+  a {
+    color: #263c31;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>ÉPOQUE</h1>
+
+<p>PRIVATE TRAVEL MANAGEMENT</p>
+<p>Abriendo tu administrador de viajes…</p>
+
+<a href="https://script.google.com/macros/s/AKfycbwL4ypvvHNEpPuCHIw7N7LjCwYJVQgJnunEz9i0cIvrcBQzDk4rMgPtnQb2OItsel0i/exec">
+  Entrar al administrador
+</a>
+
+</body>
+</html>
